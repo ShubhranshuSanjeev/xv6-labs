@@ -299,6 +299,9 @@ fork(void)
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
+  // copy trace mask
+  np->tracem = p->tracem;
+
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -692,4 +695,10 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void trace(int mask) {
+  struct proc* p = myproc();
+  p->tracem = mask;
+  printf("setting trace mask to: %ld\n", p->tracem);
 }
