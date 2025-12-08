@@ -96,6 +96,7 @@ void            setkilled(struct proc*);
 struct cpu*     mycpu(void);
 struct cpu*     getmycpu(void);
 struct proc*    myproc();
+void            save_user_trapframe();
 void            procinit(void);
 void            scheduler(void) __attribute__((noreturn));
 void            sched(void);

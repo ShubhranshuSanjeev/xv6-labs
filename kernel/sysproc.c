@@ -92,3 +92,29 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+uint64 sys_sigalarm(void) {
+  int ticks;
+  uint64 fn_ptr;
+
+  argint(0, &ticks);
+  argaddr(1, &fn_ptr);
+
+  struct proc *p = myproc();
+  acquire(&p->lock);
+  p->alarm_interval = ticks;
+  p->alarm_fn = fn_ptr;
+  release(&p->lock);
+
+  // 1. register the event
+  // 2. some mechanism to hold the process and then run the fn
+  return 0;
+}
+
+uint64 sys_sigreturn() {
+  struct proc *p = myproc();
+
+  save_user_trapframe(p->trapframe, p->trapframe_cp);
+  p->alarm_running = 0;
+  return p->trapframe->a0;
+}

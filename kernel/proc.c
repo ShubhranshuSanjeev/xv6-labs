@@ -124,9 +124,19 @@ allocproc(void)
 found:
   p->pid = allocpid();
   p->state = USED;
+  p->alarm_interval = 0;
+  p->ticks_since_alarm = 0;
+  p->alarm_fn = 0;
+  p->alarm_running = 0;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
+
+  if((p->trapframe_cp = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
     release(&p->lock);
     return 0;
@@ -158,6 +168,8 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
+  if(p->trapframe_cp)
+    kfree((void *)p->trapframe_cp);
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
@@ -169,6 +181,10 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->alarm_interval = 0;
+  p->ticks_since_alarm = 0;
+  p->alarm_fn = 0;
+  p->alarm_running = 0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -692,4 +708,39 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+void save_user_trapframe(struct trapframe *dst, struct trapframe *src) {
+  dst->epc = src->epc;
+  dst->ra = src->ra;
+  dst->sp = src->sp;
+  dst->gp = src->gp;
+  dst->tp = src->tp;
+  dst->t0 = src->t0;
+  dst->t1 = src->t1;
+  dst->t2 = src->t2;
+  dst->s0 = src->s0;
+  dst->s1 = src->s1;
+  dst->a0 = src->a0;
+  dst->a1 = src->a1;
+  dst->a2 = src->a2;
+  dst->a3 = src->a3;
+  dst->a4 = src->a4;
+  dst->a5 = src->a5;
+  dst->a6 = src->a6;
+  dst->a7 = src->a7;
+  dst->s2 = src->s2;
+  dst->s3 = src->s3;
+  dst->s4 = src->s4;
+  dst->s5 = src->s5;
+  dst->s6 = src->s6;
+  dst->s7 = src->s7;
+  dst->s8 = src->s8;
+  dst->s9 = src->s9;
+  dst->s10 = src->s10;
+  dst->s11 = src->s11;
+  dst->t3 = src->t3;
+  dst->t4 = src->t4;
+  dst->t5 = src->t5;
+  dst->t6 = src->t6;
 }
