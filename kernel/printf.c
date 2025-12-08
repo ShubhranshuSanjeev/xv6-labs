@@ -159,6 +159,20 @@ printf(char *fmt, ...)
   return 0;
 }
 
+void bt(uint64 fp) {
+  if (PGROUNDDOWN(fp) == fp) {
+    return;
+  }
+
+  uint64 nf_ptr = *(uint64 *)(fp - 16);
+  printf("%p\n", (void *)(*(uint64 *)(fp - 8)));
+  bt(nf_ptr);
+}
+
+void backtrack() {
+  bt(r_fp());
+}
+
 void
 panic(char *s)
 {
@@ -166,6 +180,7 @@ panic(char *s)
   printf("panic: ");
   printf("%s\n", s);
   panicked = 1; // freeze uart output from other CPUs
+  backtrack();
   for(;;)
     ;
 }
