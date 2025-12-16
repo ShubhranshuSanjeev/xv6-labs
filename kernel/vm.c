@@ -299,22 +299,21 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
       continue;   // page table entry hasn't been allocated
     if((*pte & PTE_V) == 0)
       continue;   // physical page hasn't been allocated
+    if ((*pte & PTE_W) || (*pte & PTE_COW)) {
+      *pte = (*pte | PTE_COW) & (~PTE_W); 
+    }
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    pgrc_incr((void *) pa);
   }
   return 0;
 
@@ -359,8 +358,12 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
     pte = walk(pagetable, va0, 0);
     // forbid copyout over read-only user text pages.
-    if((*pte & PTE_W) == 0)
+    if((*pte & PTE_W) == 0 && (*pte & PTE_COW) == 0)
       return -1;
+
+    if(*pte & PTE_COW) {
+      pa0 = cowfault(pagetable, va0);
+    }
       
     n = PGSIZE - (dstva - va0);
     if(n > len)
@@ -459,6 +462,9 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     return 0;
   va = PGROUNDDOWN(va);
   if(ismapped(pagetable, va)) {
+    if (!read) {
+      return cowfault(pagetable, va);
+    }
     return 0;
   }
   mem = (uint64) kalloc();
@@ -484,3 +490,37 @@ ismapped(pagetable_t pagetable, uint64 va)
   }
   return 0;
 }
+
+uint64 cowfault(pagetable_t pagetable, uint64 va) {
+  pte_t *pte = walk(pagetable, va, 0);
+  char *mem;
+  uint flags;
+
+  if (pte == 0)
+    return 0;
+  if ((*pte & PTE_V) == 0)
+    return 0;
+  if ((*pte & PTE_COW) == 0)
+    return 0;
+
+  uint64 pa = PTE2PA(*pte);
+  if (islastref((void *)pa) == 0) {
+    if((mem = kalloc()) == 0)
+      return 0;
+    memmove(mem, (char*)pa, PGSIZE);
+
+    *pte = ((*pte | PTE_W) & ~PTE_COW) & ~PTE_V;
+    flags = PTE_FLAGS(*pte);
+
+    if(mappages(pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+      return 0;
+    }
+    pgrc_decr((void *) pa);
+    return ((uint64) mem);
+  }
+
+  *pte = ((*pte | PTE_W) & ~PTE_COW);
+  return pa;
+}
+

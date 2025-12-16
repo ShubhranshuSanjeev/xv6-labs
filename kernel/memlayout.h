@@ -39,6 +39,10 @@
 #define KERNBASE 0x80000000L
 #define PHYSTOP (KERNBASE + 128*1024*1024)
 
+// max number of physical pages
+#define PHYPAGES (PHYSTOP / PGSIZE) // (128*1024*1024) / (4*1024)
+#define PA2RCIDX(pa) (((uint64)pa) / PGSIZE)
+
 // map the trampoline page to the highest address,
 // in both user and kernel space.
 #define TRAMPOLINE (MAXVA - PGSIZE)
