@@ -124,29 +124,54 @@ release(struct spinlock *lk)
 static void
 read_acquire_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  acquire(&rwlk->l);
+  if(rwlk->writer == mycpu())
+    panic("read acquire: already holding write lock");
+
+  while(1) {
+    int64_t sc = __atomic_load_n(&rwlk->shared_count, __ATOMIC_ACQUIRE);
+    if(sc >= 0) {
+      if(__atomic_compare_exchange_n(&rwlk->shared_count, &sc, sc+1, 0, __ATOMIC_RELEASE, __ATOMIC_RELAXED)) {
+        return;
+      }
+    }
+  }
 }
 
 static void
 read_release_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  release(&rwlk->l);
+  if (__atomic_sub_fetch(&rwlk->shared_count, (int64_t)1, __ATOMIC_RELEASE) < 0) {
+    __atomic_sub_fetch(&rwlk->active_readers, 1, __ATOMIC_RELEASE);
+  }
 }
 
 static void
 write_acquire_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  acquire(&rwlk->l);
+  if(rwlk->writer == mycpu())
+    panic("write acquire: already holding write lock");
+
+  int64_t active_readers = __atomic_fetch_sub(&rwlk->shared_count, (int64_t)MAX_READERS, __ATOMIC_RELEASE);
+  if(active_readers >= 0) {
+    // shared_count when positive should not go above 32-byte int limit
+    __atomic_fetch_add(&rwlk->active_readers, (int)active_readers, __ATOMIC_RELEASE);
+  }
+
+  acquire(rwlk->sync_writers);
+  while(__atomic_load_n(&rwlk->active_readers, __ATOMIC_RELAXED) != 0) {}
+
+  rwlk->writer = mycpu();
 }
 
 static void
 write_release_inner(struct rwspinlock *rwlk)
 {
-  // Replace this with your implementation.
-  release(&rwlk->l);
+  if(rwlk->writer != mycpu())
+    panic("write release: not holding write lock");
+
+  rwlk->writer = 0;
+  __atomic_fetch_add(&rwlk->shared_count, (int64_t)MAX_READERS, __ATOMIC_RELAXED);
+  release(rwlk->sync_writers);
 }
 
 void
@@ -178,10 +203,19 @@ write_release(struct rwspinlock *rwlk)
 }
 
 void
-initrwlock(struct rwspinlock *rwlk)
+initrwlock(struct rwspinlock *rwlk, char *name)
 {
-  // Replace this with your implementation.
-  initlock(&rwlk->l, "rwlk");
+  // this might cause segfault
+  struct spinlock *l = (struct spinlock*) kalloc();
+  initlock(l, "writers-sync-lock");
+
+  rwlk->name = name;
+  rwlk->writer = 0;
+
+  rwlk->shared_count = 0;
+  rwlk->active_readers = 0;
+  rwlk->sync_writers = l;
+  rwlk->waiting_writers = 0;
 }
 
 // Test rwspinlock implementation.
@@ -224,7 +258,7 @@ sys_rwlktest()
 
   static struct rwspinlock l;
   if (id == 0) {
-    initrwlock(&l);
+    initrwlock(&l, "testrwlock");
   }
 
   rwspinlock_test_step(++step, "concurrent read_acquire");
@@ -344,7 +378,7 @@ sys_rwlktest()
   rwspinlock_test_step(++step, "acquiring multiple locks");
 
   struct rwspinlock l2;
-  initrwlock(&l2);
+  initrwlock(&l2, "secondtestrwlk");
   write_acquire(&l2);
   read_acquire(&l);
 
