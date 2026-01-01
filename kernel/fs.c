@@ -718,3 +718,41 @@ nameiparent(char *path, char *name)
 {
   return namex(path, 1, name);
 }
+
+struct inode*
+followsymlink(struct inode* ip, int depth) {
+  if(ip->type != T_SYMLINK) {
+    return 0;
+  }
+
+  // tried tracking the visited inodes in a queue
+  // but kernel was throwing 0xd trap.
+  int max_iterations = 10, iterc = 0;
+  struct inode *nxt = ip;
+
+  while(1) {
+    if(iterc == max_iterations) {
+      iunlock(nxt);
+      return 0;
+    }
+
+    char target[MAXPATH];
+    int n = nxt->size > MAXPATH ? MAXPATH : nxt->size;
+    if(readi(nxt, 0, (uint64)(&target), 0, n) != n) {
+      return 0;
+    }
+    iunlock(nxt);
+
+    struct inode *tinode;
+    if((tinode = namei(target)) == 0) {
+      return 0;
+    }
+    ilock(tinode);
+  
+    if(tinode->type != T_SYMLINK) {
+      return tinode;
+    }
+    nxt = tinode;
+    iterc += 1;
+  }
+}
